@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""テスト用の偽 herdr。argv を FAKE_HERDR_LOG に1行1 JSON で追記し、
+FAKE_HERDR_RESPONSES (キーは先頭2語) の stdout / stderr / exit を返す。"""
+import json
+import os
+import sys
+
+argv = sys.argv[1:]
+log = os.environ.get("FAKE_HERDR_LOG")
+if log:
+    with open(log, "a", encoding="utf-8") as f:
+        f.write(json.dumps(argv, ensure_ascii=False) + "\n")
+responses = json.loads(os.environ.get("FAKE_HERDR_RESPONSES") or "{}")
+key = " ".join(argv[:2])
+resp = responses.get(key, {"stdout": '{"result":{"type":"ok"}}', "exit": 0})
+if isinstance(resp, list):
+    # 応答の列: 呼ぶたびに先頭から順に返し、最後の要素は繰り返す。消費数は状態ファイルに持つ。
+    state = (log or "fake_herdr") + ".state"
+    try:
+        counts = json.load(open(state))
+    except (OSError, ValueError):
+        counts = {}
+    n = counts.get(key, 0)
+    counts[key] = n + 1
+    json.dump(counts, open(state, "w"))
+    resp = resp[min(n, len(resp) - 1)]
+sys.stdout.write(resp.get("stdout", ""))
+sys.stderr.write(resp.get("stderr", ""))
+sys.exit(resp.get("exit", 0))
