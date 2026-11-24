@@ -94,7 +94,7 @@ herdr のペインで Claude Code を起動し、そのセッションで `/cond
 - `init_main.py`: メインを台帳に登録します
 - `check.py`: ワーカーの成果を契約の検査で確かめます
 - `reinject.py`: compact や clear のあとに、台帳の内容をメインへ入れ直します(SessionStart フック)
-- `statusline.py`: コンテキストの使用率を1行で出します
+- `statusline.py`: コンテキストの使用率を1行で出します。自動 compact の窓(`modelSettings.<モデル>.autoCompactWindow`)があればそれに対する割合、なければモデルのコンテキストウィンドウに対する割合で、`/context` の表示と揃います
 
 設計の背景は [DESIGN.md](DESIGN.md) と [DESIGN-3.md](DESIGN-3.md) にあります。
 

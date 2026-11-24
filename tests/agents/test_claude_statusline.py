@@ -1,5 +1,6 @@
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -8,8 +9,77 @@ sys.path.insert(0, str(SKILL))
 from agents.claude import ClaudeAgent  # noqa: E402
 
 
-def sl(data):
-    return ClaudeAgent().statusline(data if isinstance(data, str) else json.dumps(data))
+NOWHERE = Path("/nonexistent-conductor-test/settings.json")
+
+
+def sl(data, settings_path=NOWHERE):
+    return ClaudeAgent(settings_path).statusline(data if isinstance(data, str) else json.dumps(data))
+
+
+def payload(total, size=1_000_000, model="claude-opus-5-5", used=38):
+    cw = {"context_window_size": size, "used_percentage": used}
+    if total is not None:
+        cw["total_input_tokens"] = total
+    return {"model": {"id": model}, "context_window": cw, "cwd": "/x/p"}
+
+
+class AutoCompactWindowTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "settings.json"
+
+    def settings(self, ms):
+        self.path.write_text(json.dumps({"modelSettings": ms}), encoding="utf-8")
+
+    def run_sl(self, data):
+        return sl(data, self.path)
+
+    def test_matching_model(self):
+        self.settings({"claude-opus-5-5": {"autoCompactWindow": 500000}})
+        self.assertEqual(self.run_sl(payload(375500)), "ctx 75% · p")
+
+    def test_no_matching_model(self):
+        self.settings({"other": {"autoCompactWindow": 500000}})
+        self.assertEqual(self.run_sl(payload(375500)), "ctx 38% · p")
+
+    def test_larger_than_window(self):
+        self.settings({"claude-opus-5-5": {"autoCompactWindow": 2000000}})
+        self.assertEqual(self.run_sl(payload(375500)), "ctx 38% · p")
+
+    def test_broken_settings(self):
+        self.path.write_text("{broken", encoding="utf-8")
+        self.assertEqual(self.run_sl(payload(375500)), "ctx 38% · p")
+        self.assertEqual(sl(payload(375500), NOWHERE), "ctx 38% · p")
+        self.path.write_text("[1]", encoding="utf-8")
+        self.assertEqual(self.run_sl(payload(375500)), "ctx 38% · p")
+        self.settings(["x"])
+        self.assertEqual(self.run_sl(payload(375500)), "ctx 38% · p")
+
+    def test_invalid_values_ignored(self):
+        for v in (True, 0, -5, "500000", 5e5, None):
+            self.settings({"claude-opus-5-5": {"autoCompactWindow": v}})
+            self.assertEqual(self.run_sl(payload(375500)), "ctx 38% · p", v)
+
+    def test_missing_total_uses_used_percentage(self):
+        self.settings({"claude-opus-5-5": {"autoCompactWindow": 500000}})
+        self.assertEqual(self.run_sl(payload(None, used=10)), "ctx 10% · p")
+        self.assertEqual(self.run_sl(payload(0, used=10)), "ctx 10% · p")
+        self.assertEqual(self.run_sl(payload(5, size=0, used=10)), "ctx 10% · p")
+
+    def test_missing_everything(self):
+        d = payload(None)
+        del d["context_window"]["used_percentage"]
+        self.assertEqual(self.run_sl(d), "ctx --% · p")
+
+    def test_bracket_suffix_matches_base(self):
+        self.settings({"claude-opus-5-5": {"autoCompactWindow": 500000}})
+        self.assertEqual(self.run_sl(payload(375500, model="claude-opus-5-5[1m]")), "ctx 75% · p")
+
+    def test_exact_bracket_key_preferred(self):
+        self.settings({"claude-opus-5-5[1m]": {"autoCompactWindow": 250000},
+                       "claude-opus-5-5": {"autoCompactWindow": 500000}})
+        self.assertEqual(self.run_sl(payload(125000, model="claude-opus-5-5[1m]")), "ctx 50% · p")
 
 
 class StatuslineTest(unittest.TestCase):

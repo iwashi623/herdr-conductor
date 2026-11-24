@@ -142,7 +142,9 @@
 
 - `~/.claude/skills/conductor/statusline.py` を `~/.claude/settings.json` の `statusLine` に登録する (いまは未設定)
 - 入力の読み取りと表示はエージェントの層 (`ClaudeAgent.statusline`) に置き､`statusline.py` はエントリポイントだけにする
-- 標準入力の JSON から `context_window.used_percentage` と `cwd` (なければ `workspace.current_dir`) を読む
+- 標準入力の JSON から `context_window.total_input_tokens`･`context_window.context_window_size`･`model.id`･`cwd` (なければ `workspace.current_dir`) を読む｡`~/.claude/settings.json` の `modelSettings.<model.id>.autoCompactWindow` も読む (読めなくてもよい)
+- 使用率 NN は `total_input_tokens` を窓で割った値にする｡窓は autoCompactWindow が正の整数なら `context_window_size` との小さいほう､なければ `context_window_size` である｡`/context` の表示と合う
+- `total_input_tokens` か `context_window_size` が取れなければ `context_window.used_percentage` を使う
 - 標準出力に1行を出す: `ctx NN% · <cwd の末尾のディレクトリ名>`｡使用率が取れなければ `ctx --%`
 - ファイルには何も書かない
 - 例外が起きても1行を出して exit 0｡0.5秒以内に終わる

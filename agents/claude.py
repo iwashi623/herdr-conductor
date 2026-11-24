@@ -29,9 +29,58 @@ def _mcp_approvals(repo_root: Path) -> dict:
     return out
 
 
+def _pos_int(v) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool) and v > 0
+
+
+def _auto_compact_window(settings_path: Path, model_id) -> int | None:
+    """settings.json の modelSettings.<model id>.autoCompactWindow を返す。なければ None。"""
+    if not isinstance(model_id, str) or not model_id:
+        return None
+    try:
+        data = json.loads(settings_path.read_text(encoding="utf-8"))
+        ms = data.get("modelSettings")
+        if not isinstance(ms, dict):
+            return None
+        keys = [model_id]
+        base = model_id.split("[", 1)[0]
+        if base and base != model_id:
+            keys.append(base)
+        for k in keys:
+            entry = ms.get(k)
+            v = entry.get("autoCompactWindow") if isinstance(entry, dict) else None
+            if _pos_int(v):
+                return v
+    except Exception:
+        pass
+    return None
+
+
 class ClaudeAgent:
     name = "claude"
     hook_output_limit = 10000
+
+    def __init__(self, settings_path: Path | None = None):
+        self._settings_path = settings_path
+
+    def _percent(self, data: dict):
+        cw = data.get("context_window")
+        if not isinstance(cw, dict):
+            return None
+        total = cw.get("total_input_tokens")
+        size = cw.get("context_window_size")
+        if _pos_int(total) and _pos_int(size):
+            model = data.get("model")
+            window = size
+            path = self._settings_path or Path.home() / ".claude" / "settings.json"
+            acw = _auto_compact_window(path, model.get("id") if isinstance(model, dict) else None)
+            if acw is not None:
+                window = min(size, acw)
+            return round(total / window * 100)
+        used = cw.get("used_percentage")
+        if isinstance(used, (int, float)) and not isinstance(used, bool) and math.isfinite(used):
+            return round(used)
+        return None
 
     def launch(self, name: str, ledger_dir: Path, model: str | None, prompt: str) -> LaunchSpec:
         command = ["claude", "--name", name, "--permission-mode", "auto"]
@@ -78,12 +127,8 @@ class ClaudeAgent:
         try:
             if not isinstance(data, dict):
                 return "ctx --%"
-            cw = data.get("context_window")
-            used = cw.get("used_percentage") if isinstance(cw, dict) else None
-            if isinstance(used, (int, float)) and not isinstance(used, bool) and math.isfinite(used):
-                line = f"ctx {round(used)}%"
-            else:
-                line = "ctx --%"
+            pct = self._percent(data)
+            line = f"ctx {pct}%" if pct is not None else "ctx --%"
             d = data.get("cwd")
             if not isinstance(d, str) or not d:
                 ws = data.get("workspace")
